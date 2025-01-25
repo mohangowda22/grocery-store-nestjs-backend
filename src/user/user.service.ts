@@ -1,18 +1,28 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Inject } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { DataSource } from 'typeorm';
 import { GroceryItem } from '../entities/grocery.entity';
 import { Order } from '../entities/order.entity';
 import { OrderItem } from '../entities/order-item.entity';
+import { Cache } from 'cache-manager';
 
 @Injectable()
 export class UserService {
     constructor(
         private readonly dataSource: DataSource,
+        @Inject(CACHE_MANAGER) private cacheManager: Cache,
     ) { }
 
     async getAvailableGroceryItems(): Promise<GroceryItem[]> {
+        const cachedItems = await this.cacheManager.get<GroceryItem[]>('groceryItems');
+        if (cachedItems) {
+            return cachedItems;
+        }
+
         const groceryRepository = this.dataSource.getRepository(GroceryItem);
-        return groceryRepository.find();
+        const items = await groceryRepository.find();
+        await this.cacheManager.set('groceryItems', items, 600);
+        return items;
     }
 
     async bookGroceryItems(orderDto: { items: { id: number, quantity: number }[] }, user: any): Promise<{ orderId: number, message: string }> {
@@ -43,6 +53,7 @@ export class UserService {
             await orderItemRepository.save(orderItem);
         }
 
+        await this.cacheManager.del('groceryItems'); // Invalidate cache
         return { orderId: savedOrder.id, message: 'Order placed successfully' };
     }
 }
